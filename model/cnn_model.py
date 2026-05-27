@@ -20,7 +20,7 @@ def build_cnn(input_shape=(28, 28, 1)):
     model.add(MaxPooling2D(pool_size=(2, 2)))
 
     # Convolutional block 2
-    model.add(Conv2D(64, (3, 3), activation="relu"))
+    model.add(Conv2D(64, (3, 3), activation="relu", name="conv_block_last"))
     model.add(MaxPooling2D(pool_size=(2, 2)))
 
     # Classification head
