@@ -49,14 +49,10 @@ async def main():
     # -------------------------
     # Call predict_pneumonia tool
     # -------------------------
+    tools = await client.get_tools()
+    print("Available MCP tools:", [tool.name for tool in tools])
+
     tool = next(tool for tool in tools if tool.name == "predict_pneumonia")
-
-    results = await tool.ainvoke(
-        {
-            "image": image_np
-        }
-    )
-
 
     results = await tool.ainvoke(
         {
@@ -67,19 +63,23 @@ async def main():
     # MCP returns a list of messages; take the first one
     message = results[0]
 
-    # Parse JSON payload
-    payload = json.loads(message["text"])
+    # Prediction
+    predict_tool = next(t for t in tools if t.name == "predict_pneumonia")
+    pred_msg = (await predict_tool.ainvoke({"image": image_np}))[0]
+    pred = json.loads(pred_msg["text"])
 
-    # -------------------------
-    # Print results
-    # -------------------------
-    print("Prediction:", payload["prediction"])
-    print("Probability:", payload["probability"])
+    print("Probability:", pred["probability"])
+
+    # Explanation
+    explain_tool = next(t for t in tools if t.name == "explain_pneumonia")
+    exp_msg = (await explain_tool.ainvoke({"image": image_np}))[0]
+    exp = json.loads(exp_msg["text"])
+
     print(
         "Heatmap size:",
-        len(payload["heatmap"]),
+        len(exp["heatmap"]),
         "x",
-        len(payload["heatmap"][0]),
+        len(exp["heatmap"][0]),
     )
 
 

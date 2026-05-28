@@ -1,11 +1,10 @@
-# server.py
-
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 from fastmcp import FastMCP
 
 from model.cnn_functional import build_functional_cnn
 from model.predict_and_explain import PneumoniaModelService
+
 
 # -------------------------
 # Load model
@@ -25,13 +24,30 @@ mcp = FastMCP("Pneumonia CNN MCP Server")
 @mcp.tool()
 def predict_pneumonia(image: list) -> dict:
     """
-    Predict pneumonia and provide Grad-CAM explanation.
-
-    image: nested list with shape (28, 28, 1)
+    Predict pneumonia probability from a chest X-ray.
     """
     image_np = np.array(image, dtype=np.float32)
 
-    return service.predict_and_explain(image_np)
+    result = service.predict_and_explain(image_np)
+
+    return {
+        "prediction": result["prediction"],
+        "probability": result["probability"],
+    }
+
+
+@mcp.tool()
+def explain_pneumonia(image: list) -> dict:
+    """
+    Generate Grad-CAM explanation for a chest X-ray.
+    """
+    image_np = np.array(image, dtype=np.float32)
+
+    result = service.predict_and_explain(image_np)
+
+    return {
+        "heatmap": result["heatmap"]
+    }
 
 
 if __name__ == "__main__":
