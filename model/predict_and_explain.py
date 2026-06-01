@@ -28,8 +28,11 @@ class PneumoniaModelService:
             - heatmap
         """
 
-        # Add batch dimension
-        image_batch = np.expand_dims(image, axis=0)
+        # Enforce correct shape
+        if image.shape != (1, 28, 28, 1):
+            raise ValueError(f"predict_and_explain expected (1,28,28,1), got {image.shape}")
+
+        image_batch = image
 
         # Prediction
         prob = float(self.model.predict(image_batch)[0][0])
@@ -45,5 +48,5 @@ class PneumoniaModelService:
         return {
             "prediction": prediction,
             "probability": prob,
-            "heatmap": heatmap.tolist(),  # JSON-safe
+            "heatmap": heatmap.tolist(),
         }
