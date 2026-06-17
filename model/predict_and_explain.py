@@ -3,6 +3,31 @@ import tensorflow as tf
 
 from model.gradcam import compute_gradcam
 
+import cv2
+import numpy as np
+
+def visualize_gradcam(heatmap, original_image):
+    # resize heatmap
+    heatmap = cv2.resize(heatmap, (original_image.shape[1], original_image.shape[0]))
+
+    # normalize to 0–255
+    heatmap = np.uint8(255 * heatmap)
+
+    # apply color map
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+
+    # convert original to RGB if needed
+    if original_image.shape[-1] == 1:
+        original_image = np.repeat(original_image, 3, axis=-1)
+
+    # scale original image
+    original_image = np.uint8(255 * original_image)
+
+    # overlay
+    superimposed = cv2.addWeighted(original_image, 0.6, heatmap, 0.4, 0)
+
+    return superimposed
+
 
 class PneumoniaModelService:
     """
@@ -45,8 +70,12 @@ class PneumoniaModelService:
             conv_layer_name="conv_block_last",
         )
 
+        image_np = image_batch[0]  # remove batch
+
+        heatmap = visualize_gradcam(heatmap, image_np)
+
         return {
             "prediction": prediction,
             "probability": prob,
-            "heatmap": heatmap.tolist(),
+            "heatmap": heatmap,
         }

@@ -1,8 +1,9 @@
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict, Any
 from langgraph.graph import StateGraph, MessagesState, START, END
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_ollama import ChatOllama
 
+from rag.rag import ProjectRAG
 from mcp_server.server import predict_pneumonia, explain_pneumonia
 
 
@@ -13,99 +14,116 @@ from mcp_server.server import predict_pneumonia, explain_pneumonia
 class AgentState(MessagesState):
     image: Optional[List]
     heatmap: Optional[List]
+    retrieved_context: Optional[str]
 
 
 # ============================================================
-# System prompt (DECISION ONLY)
+# Global components
 # ============================================================
 
-SYSTEM_PROMPT = AIMessage(
-    content=(
-        "You are Pia, a medical AI assistant.\n"
-        "You cannot see images.\n"
-        "You must NEVER describe image features.\n\n"
+llm = ChatOllama(model="qwen2.5", temperature=0)
+rag = None
 
-        "Decide your action based on the user's request:\n"
-        "- CHAT: for general questions or conversation\n"
-        "- PREDICT: if the user explicitly asks to analyse or predict from an uploaded X-ray\n"
-        "- EXPLAIN: if the user asks to explain a model prediction\n\n"
-
-        "Respond with EXACTLY one of:\n"
-        "DECISION: CHAT\n"
-        "DECISION: PREDICT\n"
-        "DECISION: EXPLAIN\n\n"
-
-        "Do not write anything else."
-    )
-)
-CHAT_SYSTEM_PROMPT = AIMessage(
-    content=(
-        "You are Pia, a medical AI assistant developed for an academic project.\n"
-        "You are not Qwen, and you are not affiliated with Alibaba Cloud.\n"
-        "Do not mention model names, companies, or training origins.\n"
-        "Answer clearly, politely, and accurately.\n"
-        "For medical topics, provide general information and avoid diagnoses."
-    )
-)
 
 # ============================================================
 # Decision node
 # ============================================================
 
-def decide(state: AgentState):
-    llm = ChatOllama(model="qwen2.5", temperature=0)
+DECISION_PROMPT = """You are routing user requests in a medical AI system.
 
-    messages = [SYSTEM_PROMPT] + state["messages"]
-    response = llm.invoke(messages)
+Choose ONE label:
 
-    decision = response.content.strip().splitlines()[0]
+- CHAT:
+  General questions, explanations, or questions about pneumonia, X-rays, or how the system works.
+- PREDICT:
+  User asks to analyse or predict from an uploaded X-ray image.
+- EXPLAIN:
+  ONLY if user explicitly asks to explain a PREVIOUS prediction result or heatmap.
+
+Important:
+- General "how does it work" questions are CHAT
+
+
+Return ONLY one word.
+"""
+
+
+def decide(state: AgentState) -> Dict[str, Any]:
+    user_text = state["messages"][-1].content
+
+    response = llm.invoke([
+        HumanMessage(content=DECISION_PROMPT + "\n\nUser: " + user_text)
+    ])
+
+    decision = response.content.strip().upper()
 
     return {
-        "messages": state["messages"] + [AIMessage(content=decision)]
+        "messages": [AIMessage(content=f"DECISION: {decision}")]
+    }
+
+
+def route(state: AgentState) -> Literal["chat", "predict", "explain"]:
+    last = state["messages"][-1].content
+    image = state.get("image")
+
+    if "PREDICT" in last:
+        return "predict"
+    elif "EXPLAIN" in last:
+
+        if image is None:
+            return "chat"
+        return "explain"
+
+    return "chat"
+
+
+# ============================================================
+# RAG node
+# ============================================================
+
+def retrieve_context(state: AgentState):
+    global rag
+
+    if rag is None:
+        rag = ProjectRAG()
+
+    query = state["messages"][-2].content  # user msg before decision
+    context = rag.retrieve(query)
+
+    return {
+        "retrieved_context": context[:2000]  # prevent prompt explosion
     }
 
 
 # ============================================================
-# Chat node (THIS WAS MISSING)
+# Chat node
 # ============================================================
 
 def run_chat(state: AgentState):
-    llm = ChatOllama(model="qwen2.5", temperature=0)
-
-    # Remove decision messages
-    chat_messages = [
+    history = [
         m for m in state["messages"]
         if not (isinstance(m, AIMessage) and m.content.startswith("DECISION:"))
     ]
 
-    # Inject chat system prompt
-    messages = [CHAT_SYSTEM_PROMPT] + chat_messages
+    user_query = history[-1].content
+    context = state.get("retrieved_context", "")
 
-    response = llm.invoke(messages)
+    prompt = f"""
+You are a Pia, medical AI assistant for predicting pneumonia.
 
-    return {
-        "messages": state["messages"] + [
-            AIMessage(content=response.content)
-        ]
-    }
+Use the following context if relevant.
+If not relevant, ignore it.
 
+Context:
+{context}
 
+User:
+{user_query}
+"""
 
-# ============================================================
-# Router
-# ============================================================
+    response = llm.invoke([HumanMessage(content=prompt)])
 
-def route(state: AgentState) -> Literal["chat", "predict", "explain"]:
-    decision = state["messages"][-1].content.upper()
-
-    if decision == "DECISION: CHAT":
-        return "chat"
-    if decision == "DECISION: PREDICT":
-        return "predict"
-    if decision == "DECISION: EXPLAIN":
-        return "explain"
-
-    return "chat"
+    return {"messages": [response]}
 
 
 # ============================================================
@@ -152,6 +170,8 @@ def run_explanation(state: AgentState):
 
     result = explain_pneumonia(image=image)
 
+    heatmap = result["heatmap"]
+
     return {
         "messages": state["messages"] + [
             AIMessage(
@@ -163,8 +183,9 @@ def run_explanation(state: AgentState):
                 )
             )
         ],
-        "heatmap": result["heatmap"],
+        "heatmap": heatmap
     }
+
 
 
 # ============================================================
@@ -175,16 +196,24 @@ async def build_agent():
     builder = StateGraph(AgentState)
 
     builder.add_node("decide", decide)
+    builder.add_node("retrieve", retrieve_context)
     builder.add_node("chat", run_chat)
     builder.add_node("predict", run_prediction)
     builder.add_node("explain", run_explanation)
 
-    builder.add_edge(START, "decide")
+    builder.set_entry_point("decide")
+
     builder.add_conditional_edges(
         "decide",
         route,
-        ["chat", "predict", "explain"]
+        {
+            "chat": "retrieve",
+            "predict": "predict",
+            "explain": "explain",
+        },
     )
+
+    builder.add_edge("retrieve", "chat")
 
     builder.add_edge("chat", END)
     builder.add_edge("predict", END)

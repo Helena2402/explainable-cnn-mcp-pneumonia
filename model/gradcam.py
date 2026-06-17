@@ -5,6 +5,9 @@ import numpy as np
 
 
 def compute_gradcam(model, image, conv_layer_name):
+    if len(image.shape) == 4 and image.shape[0] > 1:
+        image = image[:1]
+
     grad_model = tf.keras.models.Model(
         model.inputs,
         [model.get_layer(conv_layer_name).output, model.output],
@@ -24,4 +27,6 @@ def compute_gradcam(model, image, conv_layer_name):
     heatmap = tf.maximum(heatmap, 0)
     heatmap /= tf.reduce_max(heatmap) + tf.keras.backend.epsilon()
 
-    return heatmap.numpy()
+    heatmap = heatmap.numpy()
+
+    return heatmap

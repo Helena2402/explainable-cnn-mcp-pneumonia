@@ -1,0 +1,60 @@
+This system analyses chest X-ray images using a convolutional neural
+network (CNN) trained for educational and demonstration purposes.
+
+IMAGE PREPROCESSING
+Uploaded images are first converted to grayscale and resized to 28×28
+pixels. Pixel values are normalised to the [0, 1] range. This preprocessing
+is required because the CNN was trained exclusively on small grayscale
+images from the PneumoniaMNIST dataset. Images with different resolution
+or colour format would not be compatible with the model.
+
+CNN ARCHITECTURE
+The CNN is a shallow architecture designed for binary classification
+(normal vs pneumonia). It consists of two convolutional layers followed
+by max-pooling operations and a dense classification head. ReLU activation
+functions are used in the convolutional layers, and a sigmoid activation
+is applied in the final layer to produce a probability score for the
+pneumonia class.
+
+The model was implemented using the Keras Functional API in order to
+support explainability methods that require access to intermediate
+layer outputs.
+
+MODEL TRAINING AND PERFORMANCE
+The model was trained using the PneumoniaMNIST dataset, which provides
+pre-split training, validation, and test sets. Training was performed for
+10 epochs. Validation accuracy stabilised at approximately 95–96 percent.
+Final evaluation accuracy on the test set reached approximately 87–88
+percent. This level of performance was considered sufficient for the
+purpose of demonstrating system design and explainability rather than
+optimising predictive accuracy.
+
+EXPLAINABILITY WITH GRAD-CAM
+To support transparent decision-making, Grad-CAM (Gradient-weighted Class
+Activation Mapping) is applied to the final convolutional layer. Grad-CAM
+generates a heatmap highlighting image regions that contributed most to
+the model’s prediction. Due to the low resolution of the input images
+(28×28), the resulting heatmaps provide only coarse spatial information
+and should be interpreted cautiously.
+
+SYSTEM ROLE SEPARATION
+The CNN is responsible only for prediction and visual explanation. It does
+not interpret results or provide medical reasoning. Prediction and
+explanation functionality is exposed as callable tools through an MCP
+server. A LangGraph-based agent orchestrates tool usage and conversational
+interaction but does not access raw model internals.
+
+LIMITATIONS AND SAFETY
+This system is not a clinical diagnostic tool. The dataset is highly
+constrained, image resolution is very low, and the model cannot generalise
+to real-world clinical X-ray data. All outputs are provided for academic
+demonstration purposes only and must not be used for medical decision-
+making.
+
+RATIONALE FOR KNOWLEDGE RETRIEVAL
+Information about preprocessing steps, model architecture, training
+behaviour, explainability methods, and limitations is specific to this
+system and cannot be reliably inferred by a language model. Retrieval-
+augmented generation is therefore used to ground the agent’s explanations
+in explicit project documentation rather than relying on parametric
+knowledge or hallucinated details.
